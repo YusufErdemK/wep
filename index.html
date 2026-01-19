@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Generator</title>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #151515;
+            color: white;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            border: 4px solid #444;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            transition: all 0.4s ease;
+            transform: translate(0%, 0%);
+        }
+
+        canvas:hover {
+            scale: 1.05;
+            transform: translate(0%, 4%);
+        }
+
+        .controls {
+            margin-bottom: 10px;
+        }
+
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+            background: #93022E;
+            border: none;
+            color: white;
+            border-radius: 40px;
+            transition: all 0.3s ease-out;
+        }
+
+        button:hover {
+            scale: 1.1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="controls">
+        <button onclick="generateMap()">Generate New Map</button>
+    </div>
+    <canvas id="mapCanvas" width="512" height="512"></canvas>
+
+    <script>
+        class Perlin {
+            constructor() {
+                this.p = new Uint8Array(512);
+                this.permutation = new Uint8Array(256);
+                for (let i = 0; i < 256; i++) this.permutation[i] = i;
+
+                // Fisher-Yates shuffle ile gerçek rastgelelik
+                for (let i = 255; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [this.permutation[i], this.permutation[j]] = [this.permutation[j], this.permutation[i]];
+                }
+
+                for (let i = 0; i < 512; i++) this.p[i] = this.permutation[i & 255];
+            }
+
+            fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+            lerp(t, a, b) { return a + t * (b - a); }
+            grad(hash, x, y, z) {
+                const h = hash & 15;
+                const u = h < 8 ? x : y;
+                const v = h < 4 ? y : h === 12 || h === 14 ? x : z;
+                return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+            }
+
+            noise(x, y, z = 0) {
+                const X = Math.floor(x) & 255;
+                const Y = Math.floor(y) & 255;
+                const Z = Math.floor(z) & 255;
+
+                x -= Math.floor(x); y -= Math.floor(y); z -= Math.floor(z);
+                const u = this.fade(x), v = this.fade(y), w = this.fade(z);
+
+                const A = this.p[X] + Y, AA = this.p[A] + Z, AB = this.p[A + 1] + Z;
+                const B = this.p[X + 1] + Y, BA = this.p[B] + Z, BB = this.p[B + 1] + Z;
+
+                return this.lerp(w, this.lerp(v, this.lerp(u, this.grad(this.p[AA], x, y, z),
+                    this.grad(this.p[BA], x - 1, y, z)),
+                    this.lerp(u, this.grad(this.p[AB], x, y - 1, z),
+                        this.grad(this.p[BB], x - 1, y - 1, z))),
+                    this.lerp(v, this.lerp(u, this.grad(this.p[AA + 1], x, y, z - 1),
+                        this.grad(this.p[BA + 1], x - 1, y, z - 1)),
+                        this.lerp(u, this.grad(this.p[AB + 1], x, y - 1, z - 1),
+                            this.grad(this.p[BB + 1], x - 1, y - 1, z - 1))));
+            }
+        }
+
+        function generateMap() {
+            const perlin = new Perlin();
+            const canvas = document.getElementById('mapCanvas');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const imageData = ctx.createImageData(width, height);
+            const data = imageData.data;
+
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+
+                    // Fractal Noise (Oktavlar) - Gerçekçi görünümün sırrı
+                    let nx = x / width - 0.5, ny = y / height - 0.5;
+                    let val = 0;
+                    let amp = 1;
+                    let freq = 1.5; // Yakınlaştırma seviyesi
+
+                    for (let i = 0; i < 6; i++) { // 6 katman gürültü
+                        val += amp * perlin.noise(freq * x * 0.01, freq * y * 0.01);
+                        amp *= 0.5;
+                        freq *= 2;
+                    }
+
+                    // Normalize et (0 ile 1 arasına çek)
+                    let v = (val + 1) / 2;
+
+                    let r, g, b;
+
+                    // Biyom Renklendirme
+                    if (v < 0.40) { r = 35; g = 65; b = 134; }      // Derin Deniz
+                    else if (v < 0.45) { r = 65; g = 105; b = 225; } // Deniz
+                    else if (v < 0.48) { r = 238; g = 214; b = 175; } // Kum/Plaj
+                    else if (v < 0.60) { r = 34; g = 139; b = 34; }   // Çimen/Ova
+                    else if (v < 0.75) { r = 139; g = 115; b = 85; }  // Dağ/Toprak
+                    else { r = 255; g = 250; b = 250; }               // Kar/Zirve
+
+                    const idx = (y * width + x) * 4;
+                    data[idx] = r;
+                    data[idx + 1] = g;
+                    data[idx + 2] = b;
+                    data[idx + 3] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        // İlk açılışta oluştur
+        generateMap();
+    </script>
+</body>
+
+</html>
